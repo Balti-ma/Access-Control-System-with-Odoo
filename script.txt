@@ -1,0 +1,148 @@
+#!/bin/python3 
+import serial
+import time
+import xmlrpc.client
+import json
+import csv
+from datetime import datetime
+
+num_maq = 0
+puerto = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+
+def registrar_uso(maquina,persona,tiempo_transcurrido,consumo,archivo='uso_maquinas.csv'):
+	try:
+		with open(archivo, 'r', newline='') as file:
+			existe = True
+	except FileNotFoundError:
+		existe = False
+	
+	with open(archivo, 'a', newline='') as file:
+		writer = csv.writer(file)
+		
+		fecha_hora_inicio = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+		# Escribir la cabecera si el archivo no existía
+		if not existe:
+			writer.writerow(['persona','maquina','fecha_hora_inicio','tiempo_transcurrido','consumo_kwh'])
+		
+		# Escribir los datos
+		writer.writerow([persona,maquina,fecha_hora_inicio,tiempo_transcurrido,consumo])
+
+
+
+if __name__ == "__main__":
+
+	print("Starting script", flush = True)
+
+	# Conexion con servidor
+	url = 'http://localhost:8069'
+	db = 'skapalab-1'
+	username = 'skapadoor@gmail.com'
+	password = 'openthedoorporfavor'
+
+	common = xmlrpc.client.ServerProxy('{}/xmlrpc/2/common'.format(url))
+	common.version()
+	uid = common.authenticate(db, username, password, {})
+	models = xmlrpc.client.ServerProxy('{}/xmlrpc/2/object'.format(url))
+
+	while True:
+		# Lee una línea de datos del puerto serie
+		line = puerto.readline().decode('utf-8').strip()
+   
+		if line:
+			print(f"[{datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}] Lectura serial: {line}", flush= True)
+			try:
+				# Deserializa la cadena JSON
+				data = json.loads(line)
+
+				# Extrae los datos del diccionario
+				Peticion = data["Peticion"]
+				APMAC = data["APMAC"]
+				NFC = data["NFC"]
+				Tiempo = data["Tiempo"]
+				Consumo = data["Consumo"]
+
+				# Muestra los datos
+				print(f"Peticion: {Peticion}, APMAC: {APMAC}, NFC: {NFC}, Tiempo: {Tiempo}, Consumo: {Consumo}", flush = True)
+
+				if Peticion: #Estan pidiendo acceso	
+					datos_usuario = []
+					lista_tags = []
+					maquinas_con_acceso = []
+					nombre_maquina = []
+					todo_correcto = True
+					
+					try:
+						datos_usuario=models.execute_kw(
+							db, uid, password, 'res.partner', 'search_read',
+							[[['is_company', '=', False], ['comment', 'like', NFC]]],
+							{'fields': ['name','comment','category_id']}
+						)
+						#print(datos_usuario)
+						#print(datos_usuario[0]['name'])
+						try:
+							lista_tags=models.execute_kw(
+								db, uid, password, 'res.partner.category', 'search_read',
+								[],
+								{'fields': ['id','name']}
+							)
+
+							try:
+								maquinas_con_acceso = [tag['name'] for tag in lista_tags if (tag['id'] in datos_usuario[0]['category_id'])]
+								try:
+									with open('MAC_maquinas.json', 'r') as archivo:
+										lista_maquinas = json.load(archivo)
+									try:
+										for i in lista_maquinas:
+											if i['MAC'] == APMAC:
+												nombre_maquina = i['name']
+												num_maq = i
+												break
+										acceso = False
+										if (nombre_maquina in maquinas_con_acceso):
+											acceso = True
+									except Exception as E05:
+										print(f"Error con lista_maquinas o maquinas_con_acceso: {E05}")
+										todo_correcto = False
+								except Exception as E04:
+									print(f"No se ha podido abrir el archivo MAC_maquinas: {E04}")
+									todo_correcto = False
+							except Exception as E03:
+								print(f"Usuario no tiene acceso a ninguna máquina: {E03}")
+								todo_correcto = False
+						except Exception as E02:
+							print(f"Error, no se puede acceder a la lista de maquinas: {E02}")
+							todo_correcto = False
+					except Exception as E01:
+						print(f"NFC no asociado a ningun usuario: {E01}")
+						todo_correcto = False
+
+					if not todo_correcto:
+						acceso = False
+
+					#Mando respuesta
+					try:
+						if not acceso:
+							data_r = {"Peticion_r": acceso, "nombre_r": 0, "Tiempo_r": 1}
+						else:
+							data_r = {"Peticion_r": acceso, "nombre_r": datos_usuario[0]['name'], "Tiempo_r": num_maq['Tiempo_Tarjeta']}
+						json_data_r = json.dumps(data_r)
+						puerto.write(json_data_r.encode('utf-8'))
+						puerto.write(b'\n')
+						print(acceso, flush = True)
+					except Exception as error:
+						print("Error al enviar respuestra", flush = True)
+						print(error, flush = True)
+				else: #Pide guardar datos
+					print("pide guardar datos", flush = True)
+					registrar_uso(nombre_maquina,datos_usuario[0]['name'],Tiempo,Consumo)
+					#Mando respuesta confirmación
+					data_r = {"Peticion_r": False, "nombre_r": "None", "Tiempo_r": 0}
+					json_data_r = json.dumps(data_r)
+					puerto.write(json_data_r.encode('utf-8'))
+					puerto.write(b'\n')
+					
+			except json.JSONDecodeError:
+				print("Error al decodificar JSON", flush = True)
+
+
+				
