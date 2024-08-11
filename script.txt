@@ -35,9 +35,9 @@ if __name__ == "__main__":
 
 	# Conexion con servidor
 	url = 'http://localhost:8069'
-	db = 'skapalab-1'
-	username = 'skapadoor@gmail.com'
-	password = 'openthedoorporfavor'
+	db = 'db-1'
+	username = '**********@gmail.com'
+	password = '*******************'
 
 	common = xmlrpc.client.ServerProxy('{}/xmlrpc/2/common'.format(url))
 	common.version()
