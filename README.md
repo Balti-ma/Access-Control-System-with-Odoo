@@ -1,6 +1,4 @@
-# Access-Control-System-with-Odoo
-
-# Project in Progress 🚧
+# Access-Control-System-with-Odoo (Project in Progress 🚧)
 
 **This project is currently in development.** Some features might not be complete or may be unstable.
 
